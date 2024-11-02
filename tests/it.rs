@@ -96,3 +96,12 @@ fn extra_args() -> Result<()> {
     cmd.arg("-al");
     cmd.exec()
 }
+
+
+#[test]
+fn variadic_expression() -> Result<()> {
+    let path = ".";
+    let option = Some("..");
+    let list = &[".", ".."];
+    shx!(ls {path} ...{option} ...{list})
+}

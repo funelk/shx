@@ -1,23 +1,16 @@
-use proc_macro2::{Group, Literal, TokenStream, TokenTree};
+use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::{quote, ToTokens, TokenStreamExt};
 
 enum Arg {
     Literal(String),
     Expr(TokenStream),
-}
-
-impl ToTokens for Arg {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Arg::Literal(s) => tokens.append(Literal::string(s)),
-            Arg::Expr(e) => tokens.append_all(e.into_token_stream()),
-        }
-    }
+    Variadic(TokenStream),
 }
 
 enum ParseState {
     Cmd,
     Args,
+    Variadic(usize),
     SetSink,
     DoneSetSink,
     SetSource,
@@ -54,6 +47,7 @@ enum CmdTokenTree {
     Value(String),
     EndOfLine,
     Expr(Group),
+    Dot,
     Sink,
     Source,
 }
@@ -66,6 +60,7 @@ impl From<TokenTree> for CmdTokenTree {
             TokenTree::Punct(c) if c.as_char() == ';' => CmdTokenTree::EndOfLine,
             TokenTree::Punct(c) if c.as_char() == '>' => CmdTokenTree::Sink,
             TokenTree::Punct(c) if c.as_char() == '<' => CmdTokenTree::Source,
+            TokenTree::Punct(c) if c.as_char() == '.' => CmdTokenTree::Dot,
             TokenTree::Punct(c) => panic!("Unexpected punctuation character: {c}"),
             TokenTree::Literal(value) => {
                 let literal = litrs::Literal::from(value);
@@ -82,7 +77,7 @@ impl From<TokenTree> for CmdTokenTree {
                         unimplemented!("Byte literals are not implemented")
                     }
                 };
-                ShTokenTree::Value(value)
+                CmdTokenTree::Value(value)
             }
         }
     }
@@ -101,6 +96,8 @@ impl Default for CmdParser {
 }
 
 impl CmdParser {
+    pub const VALID_VARIADIC_DOTS_COUNT: usize = 3;
+
     pub fn new() -> Self {
         Self {
             state: ParseState::Cmd,
@@ -112,7 +109,7 @@ impl CmdParser {
     }
 
     pub fn feed(&mut self, token: TokenTree) -> ParseResult {
-        let token = ShTokenTree::from(token);
+        let token = CmdTokenTree::from(token);
         match self.state {
             ParseState::Cmd => {
                 let CmdTokenTree::Value(value) = token else {
@@ -127,7 +124,22 @@ impl CmdParser {
                 CmdTokenTree::Expr(g) => self.args.push(Arg::Expr(g.stream())),
                 CmdTokenTree::Sink => self.state = ParseState::SetSink,
                 CmdTokenTree::Source => self.state = ParseState::SetSource,
+                CmdTokenTree::Dot => self.state = ParseState::Variadic(1),
             },
+            ParseState::Variadic(n) => {
+                self.state = match token {
+                    CmdTokenTree::Dot => ParseState::Variadic(n + 1),
+                    CmdTokenTree::Expr(g) if n == Self::VALID_VARIADIC_DOTS_COUNT => {
+                        (*self).args.push(Arg::Variadic(g.stream()));
+                        ParseState::Args
+                    }
+                    CmdTokenTree::Expr(_) => panic!(
+                        "Variadic expression dots count (x{n}) is unexpected, expect x{}",
+                        Self::VALID_VARIADIC_DOTS_COUNT
+                    ),
+                    other => panic!("Expected variadic expression token, but got: {other:?}"),
+                };
+            }
             ParseState::SetSink => {
                 assert!(self.sink.is_none(), "Can't set the sink more than once");
                 match token {
@@ -290,11 +302,15 @@ impl ToTokens for Cmd {
             ..
         } = self;
 
+        let args = args.iter().map(|arg| match arg {
+            Arg::Literal(s) => quote!({ __cmd.arg({ #s }) }),
+            Arg::Expr(ts) => quote!({ __cmd.arg({ #ts }) }),
+            Arg::Variadic(ts) => quote!({ __cmd.args({ #ts }) }),
+        });
+
         tokens.append_all(quote! {
             let mut __cmd = ::std::process::Command::new(#cmd);
-            #(
-                __cmd.arg({ #args });
-            )*
+            #( #args; )*
             let mut __builder = ::shx::CmdBuilder::new(__cmd);
         });
 

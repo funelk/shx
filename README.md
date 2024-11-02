@@ -27,6 +27,15 @@ shx!(echo hello {world} > {&mut out});
 assert_eq!(out, "hello world\n");
 out.clear();
 
+// We can use the variadic expression (`...{iter_expr}`) syntax 
+// that works with any iterable, and in Rust options are iterable.
+// This means that `...` can be used to implement optional arguments. 
+// For example:
+let path = ".";
+let option = Some("..");
+let list = &[".", ".."];
+shx!(ls {path} ...{option} ...{list})
+
 // We can also pipe a String/&str or Vec<u8>/&[u8] to a command
 let input = "foo bar baz";
 shx!(cat < {input} > {&mut out});
