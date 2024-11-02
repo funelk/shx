@@ -1,0 +1,17 @@
+[package]
+name = "shx-macros"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+keywords = ["cli", "macro", "shell"]
+description = "Rivate implementation details of shx crate"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+proc-macro2 = "1.0"
+litrs = "0.4"
